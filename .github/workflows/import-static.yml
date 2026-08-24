@@ -1,0 +1,87 @@
+name: Import Medigal static site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-static.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download current Medigal static build
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://www.medigal.it"
+          mkdir -p assets
+
+          curl -fsSL "$BASE/" -o index.html
+          curl -fsSL "$BASE/robots.txt" -o robots.txt || true
+          curl -fsSL "$BASE/favicon.ico" -o favicon.ico || true
+          curl -fsSL "$BASE/favicon.png" -o favicon.png || true
+
+          files=(
+            "assets/index-BVRBnQOF.js"
+            "assets/index-DuoqGBxm.css"
+            "assets/crio-2-ByOZW8Hx.png"
+            "assets/crio-3-BAByS0JD.png"
+            "assets/crio-4-BhCKGLSo.png"
+            "assets/criomag-1-CE9bE7ze.png"
+            "assets/criomag-2-Dwwgxzcj.png"
+            "assets/criomag-3-CBmvZjUM.png"
+            "assets/criomag-4-D7etPdE1.png"
+            "assets/crioterapia-C8JVV2Vn.png"
+            "assets/hero-bg-Ru7woj31.jpg"
+            "assets/logo-CFc5HvJm.png"
+            "assets/logo-grande-CJRWVe7t.png"
+            "assets/magneto-pro-CeBJ__jc.png"
+            "assets/magneto-touch-Cc1dgCfQ.png"
+            "assets/me2200-2-B7nOp_Mg.png"
+            "assets/me2200-3-BXfcWriy.png"
+            "assets/me2200-4-C6F-8AyV.png"
+            "assets/me3300-2-B9rAOaNf.png"
+            "assets/me3300-3-BsQEP0Ul.png"
+          )
+
+          for file in "${files[@]}"; do
+            echo "Downloading $file"
+            curl -fsSL "$BASE/$file" -o "$file"
+          done
+
+          cat > .htaccess <<'EOF'
+          <IfModule mod_rewrite.c>
+            RewriteEngine On
+            RewriteBase /
+            RewriteCond %{REQUEST_FILENAME} !-f
+            RewriteCond %{REQUEST_FILENAME} !-d
+            RewriteRule . /index.html [L]
+          </IfModule>
+          EOF
+
+          cat > vercel.json <<'EOF'
+          {
+            "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+          }
+          EOF
+
+      - name: Commit imported site
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Import complete Medigal static site"
+          git push
