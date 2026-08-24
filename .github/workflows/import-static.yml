@@ -17,45 +17,67 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download current Medigal static build
+      - name: Mirror current Medigal static build
         shell: bash
         run: |
           set -euo pipefail
-          BASE="https://www.medigal.it"
-          mkdir -p assets
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          from urllib.parse import urljoin
+          import re
 
-          curl -fsSL "$BASE/" -o index.html
-          curl -fsSL "$BASE/robots.txt" -o robots.txt || true
-          curl -fsSL "$BASE/favicon.ico" -o favicon.ico || true
-          curl -fsSL "$BASE/favicon.png" -o favicon.png || true
+          BASE = "https://www.medigal.it/"
+          UA = "Mozilla/5.0 (compatible; MedigalStaticImport/1.0)"
 
-          files=(
-            "assets/index-BVRBnQOF.js"
-            "assets/index-DuoqGBxm.css"
-            "assets/crio-2-ByOZW8Hx.png"
-            "assets/crio-3-BAByS0JD.png"
-            "assets/crio-4-BhCKGLSo.png"
-            "assets/criomag-1-CE9bE7ze.png"
-            "assets/criomag-2-Dwwgxzcj.png"
-            "assets/criomag-3-CBmvZjUM.png"
-            "assets/criomag-4-D7etPdE1.png"
-            "assets/crioterapia-C8JVV2Vn.png"
-            "assets/hero-bg-Ru7woj31.jpg"
-            "assets/logo-CFc5HvJm.png"
-            "assets/logo-grande-CJRWVe7t.png"
-            "assets/magneto-pro-CeBJ__jc.png"
-            "assets/magneto-touch-Cc1dgCfQ.png"
-            "assets/me2200-2-B7nOp_Mg.png"
-            "assets/me2200-3-BXfcWriy.png"
-            "assets/me2200-4-C6F-8AyV.png"
-            "assets/me3300-2-B9rAOaNf.png"
-            "assets/me3300-3-BsQEP0Ul.png"
-          )
+          def fetch(url):
+              req = Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
+              with urlopen(req, timeout=45) as r:
+                  return r.read()
 
-          for file in "${files[@]}"; do
-            echo "Downloading $file"
-            curl -fsSL "$BASE/$file" -o "$file"
-          done
+          def save(rel, data):
+              p = Path(rel)
+              p.parent.mkdir(parents=True, exist_ok=True)
+              p.write_bytes(data)
+              print(f"saved {rel} ({len(data)} bytes)")
+
+          html = fetch(BASE)
+          save("index.html", html)
+
+          text = html.decode("utf-8", "ignore")
+          pattern = re.compile(r"(?:\./|/)?assets/[A-Za-z0-9._-]+")
+          queue = []
+          seen = set()
+
+          def add_refs(s):
+              for ref in pattern.findall(s):
+                  rel = ref.lstrip("./")
+                  if rel not in seen and rel not in queue:
+                      queue.append(rel)
+
+          add_refs(text)
+
+          while queue:
+              rel = queue.pop(0)
+              if rel in seen:
+                  continue
+              seen.add(rel)
+              data = fetch(urljoin(BASE, rel))
+              save(rel, data)
+              if rel.endswith((".js", ".css", ".html")):
+                  add_refs(data.decode("utf-8", "ignore"))
+
+          for rel in ("robots.txt", "favicon.ico", "favicon.png", "placeholder.svg"):
+              try:
+                  save(rel, fetch(urljoin(BASE, rel)))
+              except Exception as e:
+                  print(f"optional {rel} skipped: {e}")
+
+          if not any(Path("assets").glob("*.js")):
+              raise SystemExit("No JavaScript bundle downloaded")
+          if not any(Path("assets").glob("*.css")):
+              raise SystemExit("No CSS bundle downloaded")
+          PY
 
           cat > .htaccess <<'EOF'
           <IfModule mod_rewrite.c>
