@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'medigal-sito-statico.zip'
       - '.github/workflows/import-static.yml'
   workflow_dispatch:
 
@@ -17,94 +18,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Mirror current Medigal static build
+      - name: Extract uploaded static site
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          from urllib.request import Request, urlopen
-          from urllib.parse import urljoin
-          import re, traceback, shutil
+          set -euo pipefail
+          ZIP="medigal-sito-statico.zip"
 
-          BASE = "https://www.medigal.it/"
-          UA = "Mozilla/5.0 (compatible; MedigalStaticImport/1.1)"
-          tmp = Path("_import_tmp")
-          if tmp.exists():
-              shutil.rmtree(tmp)
-          tmp.mkdir()
+          if [ ! -f "$ZIP" ]; then
+            echo "ZIP not present yet: waiting for upload."
+            exit 0
+          fi
 
-          def fetch(url):
-              req = Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
-              with urlopen(req, timeout=45) as r:
-                  return r.read()
+          rm -rf _site
+          mkdir _site
+          set +e
+          unzip -o "$ZIP" -d _site
+          UNZIP_CODE=$?
+          set -e
+          if [ "$UNZIP_CODE" -gt 1 ]; then
+            echo "Unzip failed with code $UNZIP_CODE"
+            exit "$UNZIP_CODE"
+          fi
 
-          def save(rel, data):
-              p = tmp / rel
-              p.parent.mkdir(parents=True, exist_ok=True)
-              p.write_bytes(data)
-              print(f"saved {rel} ({len(data)} bytes)")
+          test -f _site/index.html
+          test -f _site/assets/index-BVRBnQOF.js
+          test -f _site/assets/index-DuoqGBxm.css
 
-          status = []
-          try:
-              html = fetch(BASE)
-              save("index.html", html)
-              text = html.decode("utf-8", "ignore")
-              pattern = re.compile(r"(?:\./|/)?assets/[A-Za-z0-9._-]+")
-              queue, seen = [], set()
-
-              def add_refs(s):
-                  for ref in pattern.findall(s):
-                      rel = ref.lstrip("./")
-                      if rel not in seen and rel not in queue:
-                          queue.append(rel)
-
-              add_refs(text)
-              while queue:
-                  rel = queue.pop(0)
-                  if rel in seen:
-                      continue
-                  seen.add(rel)
-                  data = fetch(urljoin(BASE, rel))
-                  save(rel, data)
-                  if rel.endswith((".js", ".css", ".html")):
-                      add_refs(data.decode("utf-8", "ignore"))
-
-              for rel in ("robots.txt", "favicon.ico", "favicon.png", "placeholder.svg"):
-                  try:
-                      save(rel, fetch(urljoin(BASE, rel)))
-                  except Exception as e:
-                      status.append(f"optional {rel}: {e!r}")
-
-              if not any((tmp / "assets").glob("*.js")):
-                  raise RuntimeError("No JavaScript bundle downloaded")
-              if not any((tmp / "assets").glob("*.css")):
-                  raise RuntimeError("No CSS bundle downloaded")
-
-              for child in tmp.iterdir():
-                  dest = Path(child.name)
-                  if dest.exists() and dest.is_dir():
-                      shutil.rmtree(dest)
-                  elif dest.exists():
-                      dest.unlink()
-                  shutil.move(str(child), str(dest))
-              status.insert(0, "IMPORT_OK")
-          except Exception:
-              status.insert(0, "IMPORT_FAILED")
-              status.append(traceback.format_exc())
-
-          Path("IMPORT_STATUS.txt").write_text("\n".join(status), encoding="utf-8")
-          shutil.rmtree(tmp, ignore_errors=True)
-          PY
-
-          cat > .htaccess <<'EOF'
-          <IfModule mod_rewrite.c>
-            RewriteEngine On
-            RewriteBase /
-            RewriteCond %{REQUEST_FILENAME} !-f
-            RewriteCond %{REQUEST_FILENAME} !-d
-            RewriteRule . /index.html [L]
-          </IfModule>
-          EOF
+          rm -rf assets
+          cp -a _site/. .
+          rm -rf _site
+          rm -f "$ZIP" IMPORT_STATUS.txt
 
           cat > vercel.json <<'EOF'
           {
@@ -112,16 +55,15 @@ jobs:
           }
           EOF
 
-      - name: Commit importer result
-        if: always()
+      - name: Commit complete site
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "Nothing to commit"
             exit 0
           fi
-          git commit -m "Import Medigal static site result"
+          git commit -m "Import complete Medigal static site"
           git push
