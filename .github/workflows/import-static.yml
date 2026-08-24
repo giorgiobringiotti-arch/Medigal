@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'medigal-sito-statico.zip'
+      - 'upload_parts/**'
       - '.github/workflows/import-static.yml'
   workflow_dispatch:
 
@@ -18,27 +18,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract uploaded static site
+      - name: Rebuild and extract uploaded site
         shell: bash
         run: |
           set -euo pipefail
-          ZIP="medigal-sito-statico.zip"
-
-          if [ ! -f "$ZIP" ]; then
-            echo "ZIP not present yet: waiting for upload."
+          shopt -s nullglob
+          parts=(upload_parts/part*.b64)
+          if [ ${#parts[@]} -eq 0 ]; then
+            echo "No upload parts present."
             exit 0
           fi
 
+          ZIP="medigal-sito-statico.zip"
+          : > "$ZIP"
+          for f in "${parts[@]}"; do
+            echo "Decoding $f"
+            base64 -d "$f" >> "$ZIP"
+          done
+
+          unzip -t "$ZIP" >/dev/null
           rm -rf _site
           mkdir _site
-          set +e
-          unzip -o "$ZIP" -d _site
-          UNZIP_CODE=$?
-          set -e
-          if [ "$UNZIP_CODE" -gt 1 ]; then
-            echo "Unzip failed with code $UNZIP_CODE"
-            exit "$UNZIP_CODE"
-          fi
+          unzip -oq "$ZIP" -d _site
 
           test -f _site/index.html
           test -f _site/assets/index-BVRBnQOF.js
@@ -46,7 +47,7 @@ jobs:
 
           rm -rf assets
           cp -a _site/. .
-          rm -rf _site
+          rm -rf _site upload_parts
           rm -f "$ZIP" IMPORT_STATUS.txt
 
           cat > vercel.json <<'EOF'
