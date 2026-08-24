@@ -27,7 +27,23 @@ jobs:
 
           rm -rf _site
           mkdir _site
-          unzip -oq "$ZIP" -d _site
+
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          src = Path('medigal-sito-statico.zip')
+          dst = Path('_site')
+          with zipfile.ZipFile(src) as z:
+              for info in z.infolist():
+                  clean = info.filename.replace('\\', '/').lstrip('/')
+                  if not clean or clean.endswith('/'):
+                      continue
+                  target = dst / clean
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with z.open(info) as r, open(target, 'wb') as w:
+                      w.write(r.read())
+          PY
 
           test -f _site/index.html
           test -f _site/assets/index-BVRBnQOF.js
