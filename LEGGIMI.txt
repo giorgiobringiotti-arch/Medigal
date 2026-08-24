@@ -1,0 +1,34 @@
+SITO MEDIGAL - copia statica completa
+=====================================
+
+Cosa c'e' dentro
+----------------
+Il sito gia' compilato: HTML, CSS, JavaScript e tutte le immagini.
+Non serve nessun programma o database per pubblicarlo.
+
+Come metterlo online
+--------------------
+1. Carica TUTTO il contenuto di questa cartella (compreso il file .htaccess)
+   nella cartella pubblica del tuo hosting: di solito si chiama
+   public_html, htdocs oppure www.
+2. Il sito e' subito online. Non serve altro.
+
+Nota: il file .htaccess serve a far funzionare le pagine interne
+(es. /prodotti, /contatti) quando qualcuno le apre direttamente o le
+ricarica. Se l'hosting non e' Apache (es. Nginx, Netlify, Vercel)
+va impostato al suo posto il "fallback su index.html".
+
+Come vederlo sul proprio computer
+---------------------------------
+Aprendo index.html con doppio click il sito NON si vede correttamente:
+e' un'applicazione web e ha bisogno di un server.
+Per una prova in locale, da terminale dentro questa cartella:
+
+    npx serve -s .
+
+poi apri l'indirizzo che compare (di solito http://localhost:3000).
+
+Cosa NON e' incluso
+-------------------
+I moduli dinamici lato server (invio form / email) non fanno parte
+dei file statici: restano configurati sull'hosting originale.

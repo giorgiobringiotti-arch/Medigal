@@ -1,3 +1,4 @@
+# Fallback single-page app: ogni URL non esistente serve index.html
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
