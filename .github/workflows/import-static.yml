@@ -20,15 +20,18 @@ jobs:
       - name: Mirror current Medigal static build
         shell: bash
         run: |
-          set -euo pipefail
           python - <<'PY'
           from pathlib import Path
           from urllib.request import Request, urlopen
           from urllib.parse import urljoin
-          import re
+          import re, traceback, shutil
 
           BASE = "https://www.medigal.it/"
-          UA = "Mozilla/5.0 (compatible; MedigalStaticImport/1.0)"
+          UA = "Mozilla/5.0 (compatible; MedigalStaticImport/1.1)"
+          tmp = Path("_import_tmp")
+          if tmp.exists():
+              shutil.rmtree(tmp)
+          tmp.mkdir()
 
           def fetch(url):
               req = Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
@@ -36,47 +39,61 @@ jobs:
                   return r.read()
 
           def save(rel, data):
-              p = Path(rel)
+              p = tmp / rel
               p.parent.mkdir(parents=True, exist_ok=True)
               p.write_bytes(data)
               print(f"saved {rel} ({len(data)} bytes)")
 
-          html = fetch(BASE)
-          save("index.html", html)
+          status = []
+          try:
+              html = fetch(BASE)
+              save("index.html", html)
+              text = html.decode("utf-8", "ignore")
+              pattern = re.compile(r"(?:\./|/)?assets/[A-Za-z0-9._-]+")
+              queue, seen = [], set()
 
-          text = html.decode("utf-8", "ignore")
-          pattern = re.compile(r"(?:\./|/)?assets/[A-Za-z0-9._-]+")
-          queue = []
-          seen = set()
+              def add_refs(s):
+                  for ref in pattern.findall(s):
+                      rel = ref.lstrip("./")
+                      if rel not in seen and rel not in queue:
+                          queue.append(rel)
 
-          def add_refs(s):
-              for ref in pattern.findall(s):
-                  rel = ref.lstrip("./")
-                  if rel not in seen and rel not in queue:
-                      queue.append(rel)
+              add_refs(text)
+              while queue:
+                  rel = queue.pop(0)
+                  if rel in seen:
+                      continue
+                  seen.add(rel)
+                  data = fetch(urljoin(BASE, rel))
+                  save(rel, data)
+                  if rel.endswith((".js", ".css", ".html")):
+                      add_refs(data.decode("utf-8", "ignore"))
 
-          add_refs(text)
+              for rel in ("robots.txt", "favicon.ico", "favicon.png", "placeholder.svg"):
+                  try:
+                      save(rel, fetch(urljoin(BASE, rel)))
+                  except Exception as e:
+                      status.append(f"optional {rel}: {e!r}")
 
-          while queue:
-              rel = queue.pop(0)
-              if rel in seen:
-                  continue
-              seen.add(rel)
-              data = fetch(urljoin(BASE, rel))
-              save(rel, data)
-              if rel.endswith((".js", ".css", ".html")):
-                  add_refs(data.decode("utf-8", "ignore"))
+              if not any((tmp / "assets").glob("*.js")):
+                  raise RuntimeError("No JavaScript bundle downloaded")
+              if not any((tmp / "assets").glob("*.css")):
+                  raise RuntimeError("No CSS bundle downloaded")
 
-          for rel in ("robots.txt", "favicon.ico", "favicon.png", "placeholder.svg"):
-              try:
-                  save(rel, fetch(urljoin(BASE, rel)))
-              except Exception as e:
-                  print(f"optional {rel} skipped: {e}")
+              for child in tmp.iterdir():
+                  dest = Path(child.name)
+                  if dest.exists() and dest.is_dir():
+                      shutil.rmtree(dest)
+                  elif dest.exists():
+                      dest.unlink()
+                  shutil.move(str(child), str(dest))
+              status.insert(0, "IMPORT_OK")
+          except Exception:
+              status.insert(0, "IMPORT_FAILED")
+              status.append(traceback.format_exc())
 
-          if not any(Path("assets").glob("*.js")):
-              raise SystemExit("No JavaScript bundle downloaded")
-          if not any(Path("assets").glob("*.css")):
-              raise SystemExit("No CSS bundle downloaded")
+          Path("IMPORT_STATUS.txt").write_text("\n".join(status), encoding="utf-8")
+          shutil.rmtree(tmp, ignore_errors=True)
           PY
 
           cat > .htaccess <<'EOF'
@@ -95,7 +112,8 @@ jobs:
           }
           EOF
 
-      - name: Commit imported site
+      - name: Commit importer result
+        if: always()
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -105,5 +123,5 @@ jobs:
             echo "No changes to commit"
             exit 0
           fi
-          git commit -m "Import complete Medigal static site"
+          git commit -m "Import Medigal static site result"
           git push
