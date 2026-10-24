@@ -1,0 +1,7 @@
+
+# Local environment and deployment credentials
+.env
+.env.*
+!.env.example
+.vercel/
+node_modules/
